@@ -1,0 +1,104 @@
+#time_table(Python)
+import pandas as pd
+import random
+
+# Step 1: Load and Clean the Data
+file_path = "C:\\Users\\ABHINAV\\Downloads\\time table.csv"
+df = pd.read_csv(file_path)
+
+# Rename columns for consistency
+df.columns = [
+    "SI_No", "Course_Code", "Course_Title", "Credits_L_T_P_S_C", "Pre_requisite",
+    "Faculty", "TA", "Lab_Assistance_TA", "Classroom",
+    "Segment_I", "Segment_II", "Segment_III", "Segment_IV", "Extra"
+]
+
+# Drop rows where Course_Title is missing
+df = df.dropna(subset=["Course_Title"])
+
+# Extract L, T, P, S, C from the Credits_L_T_P_S_C column
+# Example format: "3-1-0-0-2" -> L=3, T=1, P=0, S=0, C=2
+df[["L", "T", "P", "S", "C"]] = df["Credits_L_T_P_S_C"].str.extract(r"(\d+)-(\d+)-(\d+)-(\d+)-(\d+)").astype(float)
+
+# For scheduling, we don't need self-study (S), so we ignore it.
+# Drop extra columns if desired:
+df = df.drop(columns=["SI_No", "Pre_requisite", "TA", "Lab_Assistance_TA", "Extra", "Credits_L_T_P_S_C"])
+
+# Step 2: Define Available Time Slots and Days
+# Time slots: ensuring classes end by 5 PM
+available_slots = ["09:00-10:30", "10:30-12:00", "01:00-02:30", "02:30-04:00", "04:00-05:00"]
+days = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"]
+
+# Initialize an empty timetable for each day
+timetable = {day: {slot: None for slot in available_slots} for day in days}
+
+# Helper dictionary to track assigned courses per day (to avoid multiple occurrences on same day)
+assigned_courses = {day: set() for day in days}
+
+# Step 3: Separate Courses by Credits
+# 4-credit: Full semester courses
+four_credit_courses = df[df["C"] == 4]
+# 3-credit: Electives (full semester elective courses)
+three_credit_courses = df[df["C"] == 3]
+# 2-credit: Half semester courses (to be divided equally)
+two_credit_courses = df[df["C"] == 2]
+
+# Step 4: Schedule 4-Credit Courses (Full Semester)
+# For these, we'll schedule two lecture sessions ("L1" and "L2") on any available days
+for idx, row in four_credit_courses.iterrows():
+    required_sessions = ["L1", "L2"]  # Each session is 1.5 hours
+    for session in required_sessions:
+        # Try to find a day where this course is not already scheduled
+        for day in days:
+            if row["Course_Title"] in assigned_courses[day]:
+                continue  # Skip if already scheduled on that day
+            # Find an available time slot on that day
+            free_slots = [s for s in available_slots if timetable[day][s] is None]
+            if free_slots:
+                slot = free_slots.pop(0)
+                timetable[day][slot] = f"{row['Course_Title']} ({session})"
+                assigned_courses[day].add(row["Course_Title"])
+                break
+
+# Step 5: Schedule 3-Credit Elective Courses
+# Randomly choose 2 days from the week to assign electives (to avoid conflicts)
+elective_days = random.sample(days, 2)
+for idx, row in three_credit_courses.iterrows():
+    # Choose one of the elective days randomly
+    elective_day = random.choice(elective_days)
+    free_slots = [s for s in available_slots if timetable[elective_day][s] is None]
+    if free_slots:
+        slot = free_slots.pop(0)
+        timetable[elective_day][slot] = f"{row['Course_Title']} (Elective)"
+        assigned_courses[elective_day].add(row["Course_Title"])
+    else:
+        # If no slot available on that elective day, try any day
+        for day in days:
+            free_slots = [s for s in available_slots if timetable[day][s] is None]
+            if free_slots:
+                slot = free_slots.pop(0)
+                timetable[day][slot] = f"{row['Course_Title']} (Elective)"
+                assigned_courses[day].add(row["Course_Title"])
+                break
+
+# Step 6: Schedule 2-Credit Courses (Half Semester)
+# Divide the 2-credit courses equally into first half and second half
+two_credit_courses = two_credit_courses.reset_index(drop=True)
+split_index = len(two_credit_courses) // 2
+first_half = two_credit_courses.iloc[:split_index]
+second_half = two_credit_courses.iloc[split_index:]
+
+for half_label, courses in zip(["First Half", "Second Half"], [first_half, second_half]):
+    for idx, row in courses.iterrows():
+        for day in days:
+            free_slots = [s for s in available_slots if timetable[day][s] is None]
+            if free_slots:
+                slot = free_slots.pop(0)
+                timetable[day][slot] = f"{row['Course_Title']} ({half_label})"
+                assigned_courses[day].add(row["Course_Title"])
+                break
+
+# Step 7: Convert the timetable dictionary to a DataFrame for visualization
+final_timetable_df = pd.DataFrame(timetable)
+print("Final Timetable:")
+print(final_timetable_df)
